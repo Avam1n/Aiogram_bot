@@ -1,7 +1,9 @@
 import logging
 import time
 import vk
-from config import Token_VK_not_my, Token_VK, Token_VK_Jeki
+
+import send_emile
+from config import Token_VK_not_my, Token_VK_Jeki
 from collections import Counter
 import random
 
@@ -11,7 +13,7 @@ start_time = time.time()
 
 
 class SearchForActive:
-    token = {1: Token_VK, 2: Token_VK_Jeki, 3: Token_VK_not_my}
+    token = {1: Token_VK_Jeki, 2: Token_VK_not_my}
     group_id = ''
     dict_posts = {}
     owner_id_list = []
@@ -23,22 +25,22 @@ class SearchForActive:
     def __init__(self, group_id):
         self.group_id = group_id
 
-    def check_group(self):
+    def check_group(self) -> str:
         """Принимаем и настраиваем на вывод id группы (пример: ввод -->'cybersportby', вывод --> '-78017410')."""
-        # try:
-        match self.group_id:
-            case int(self.group_id):
-                get_group = self.group_id
-                return get_group
-            case _:
-                get_group = vk_api.groups.getById(group_id=self.group_id)
-                get_group_id = get_group[0]
-                group_id = get_group_id.get('id')
-                return f'-{group_id}'
-        # except Exception as err:
-            # logging.error(f'{err}')
-            # return f'Что-то пошло не так, ошибка ввода ID группы!\n' \
-            #        f'(пример: ввод -->\'cybersportby\', или\'-78017410\')'
+        try:
+            match self.group_id:
+                case int(self.group_id):
+                    get_group = self.group_id
+                    return get_group
+                case _:
+                    get_group = vk_api.groups.getById(group_id=self.group_id)
+                    get_group_id = get_group[0]
+                    group_id = get_group_id.get('id')
+                    return f'-{group_id}'
+        except Exception as err:
+            logging.error(f'{err}')
+            return f'Что-то пошло не так, ошибка ввода ID группы!\n' \
+                   f'(пример: ввод -->\'cybersportby\', или\'-78017410\')'
 
     def check_posts(self, get_offset: int) -> dict:
         """Данный метод нужен для того, чтобы перебрать и взять нужную информацию по ВСЕМ постам группы, и определяем
@@ -54,38 +56,39 @@ class SearchForActive:
         access_token = yield_token()
 
         while True:
-            # try:
-            checking_posts = vk_api.wall.get(access_token=next(access_token),
-                                             owner_id=SearchForActive.check_group(self),
-                                             offset=offset,
-                                             count=100,
-                                             filter='all')['items']
-            time.sleep(random.uniform(0.4, 0.6))
+            try:
+                checking_posts = vk_api.wall.get(access_token=next(access_token),
+                                                 owner_id=SearchForActive.check_group(self),
+                                                 offset=offset,
+                                                 count=100,
+                                                 filter='all',
+                                                 extended=1,
+                                                 )
 
-            if len(checking_posts) == 100:
-                for post_id in checking_posts:
-                    self.owner_id_list.append(post_id['owner_id'])
-                    self.id_list.append(post_id['id'])
-                offset += int(len(checking_posts))
-                if offset == get_offset:
+                time.sleep(random.uniform(1.5, 2.2))
+
+                for post_id in checking_posts['items']:
+                    if post_id is not None:
+                        print(f"Пост: {post_id.get('id')}, лайки: {post_id.get('likes').get('count')}")
+                        self.owner_id_list.append(post_id['owner_id'])
+                        self.id_list.append(post_id['id'])
+
+                offset += int(len(checking_posts['items']))
+                print(f'{offset}/{checking_posts["count"]}')
+
+                if int(get_offset) == int(offset) or int(offset) == int(checking_posts['count']):
                     break
-
-            elif len(checking_posts) != 100:
-                for post_id in checking_posts:
-                    self.owner_id_list.append(post_id['owner_id'])
-                    self.id_list.append(post_id['id'])
-                offset += int(len(checking_posts))
-            # except Exception as err:
-            #     logging.error(f'{err}')
-            #     return f"Выполнение остановлено!\nОшибка с перебором постов!"
+            except Exception as err:
+                logging.error(f'{err}')
+                return f"Выполнение остановлено!\nОшибка с перебором постов!"
 
         self.dict_posts = dict(
             zip(self.id_list, self.owner_id_list))  # Записываем ID в словарь для дальнейшей работы с ним.
 
+        offset_likes = 0
         for key, value in self.dict_posts.items():
             """Усыпляем каждый раз потому что того требует VkAPI."""
 
-            offset_likes = 0
             while True:
                 try:
                     check_list = vk_api.likes.getList(access_token=next(access_token),
@@ -94,13 +97,19 @@ class SearchForActive:
                                                       item_id=key,
                                                       extended=0,
                                                       offset=offset_likes,
-                                                      count=1000)['items']
+                                                      count=1000)
 
-                    time.sleep(random.uniform(0.4, 0.6))
-                    for element in check_list:
-                        self.favorite_users.append(element)
-                    offset_likes += len(check_list)
-                    if len(check_list) == 0:
+                    time.sleep(random.uniform(1.5, 2.2))
+                    offset_likes += len(check_list['items'])
+                    count_likes = 1
+                    for element in check_list['items']:
+                        if element is not None:
+                            print(f"{count_likes}: ID лайкнувшего: {element}")
+                            self.favorite_users.append(element)
+                            count_likes += 1
+                    print(f"{offset_likes}/{check_list['count']}")
+                    if int(offset_likes) >= check_list['count']:
+                        offset_likes = 0
                         break
                 except Exception as err:
                     logging.error(f'{err}')
@@ -115,7 +124,7 @@ class SearchForActive:
 
         return self.final_dict
 
-    def open_account_check(self):
+    def open_account_check(self) -> list:
         try:
             open_account_list = vk_api.users.get(user_ids=[k for k, v in self.final_dict.items()],
                                                  fields='city')
@@ -135,10 +144,9 @@ class SearchForActive:
 
     def show_file(self):  # Реализуем показ нужной нам информации.
         try:
-            list_users = SearchForActive.open_account_check(self)
             with open(f'{self.group_id}.html', 'w', encoding='UTF-8') as file:
                 count = 1
-                for element in list_users:
+                for element in SearchForActive.open_account_check(self):
                     element_with_city_item = element.get('city', f'{"-------"}')
                     print(
                         f"-{count}-"
@@ -163,10 +171,20 @@ def main(some, offset):
         start_search.check_posts(offset)
         start_search.open_account_check()
         start_search.show_file()
+
+        start_search.dict_posts.clear()
+        start_search.owner_id_list.clear()
+        start_search.id_list.clear()
+        start_search.favorite_users.clear()
+        start_search.favorite_users_dict.clear()
+        start_search.final_dict.clear()
+
+        logging.info('Парсинг окончен!')
+        send_emile.main('Парсинг окончен!')
     except Exception as error:
         logging.error(f'{error}')
         return False
 
 
 if __name__ == '__main__':
-    print(main())
+    main('belteanews', 0)

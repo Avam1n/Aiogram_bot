@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO,
                     filemode="w",
                     format="%(asctime)-15s - %(pathname)s - %(funcName)-8s: Line: %(lineno)d.(%(message)s)",
                     datefmt='%d-%b-%y %H:%M:%S')
-bot = Bot(token=API_TOKEN)
+bot = Bot(API_TOKEN)
 
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
@@ -44,13 +44,15 @@ class Form(StatesGroup):
     number_of_posts = State()
 
 
-def id_verification(some_id):
+def id_verification(some_id: int) -> bool:
     """
     Проверяем на ликвидность ID юзера, у которого будет доступ к функциям бота.
     """
-    for id_in_list in config.list_id:
-        if id_in_list != some_id:
-            return False
+    if not some_id in config.list_id:
+        print(f'Пользователь с ID: {some_id} попытался воспользоваться ботом.')
+        return False
+    else:
+        print(f'Пользователь с ID: {some_id} юзает бота.')
         return True
 
 
@@ -64,7 +66,8 @@ async def cmd_start(message: types.Message):
         else:
             await bot.send_message(message.chat.id, f"Прошу прощения, {message.from_user.username}, "
                                                     f"но у Вас нет прав пользоваться моими функциями.\n"
-                                                    f"По всем вопросам можете написать сюда: <a>@avix1n</a>",
+                                                    f"По всем вопросам можете написать сюда: <a>@avix1n</a>"
+                                                    f"Ваш ID: {message.from_user.id}",
                                    parse_mode='HTML')
 
 
@@ -73,11 +76,13 @@ async def communication(message: types.Message):
     if message.chat.type == 'private':
         if id_verification(message.from_user.id):
             if message.text.upper() == 'НАЧАТЬ СБОР ДАННЫХ.':
+                await Form.group_id.set()
+
                 await message.reply(f"Введи ID группы.\n"
                                     f"(пример: \"cybersportby\" или \"78017410\")\n"
                                     f"Для отмены напиши \"стоп\"")
 
-                await Form.group_id.set()
+
 
 
         else:
@@ -116,12 +121,17 @@ async def process_number_of_posts_invalid(message: types.Message):
     return await message.reply("Похоже что Вы ввели сообщение вместо того, чтобы нажать на кнопку.")
 
 
+async def send_doc(file_name, chat_id):
+    with open(f'{file_name}.html', 'rb') as file:
+        await bot.send_document(chat_id, file)
+    os.remove(f'{file_name}.html')
+
+
 @TimeoutErrorHandler
 @dp.message_handler(state=Form.number_of_posts)
 async def result(message: types.Message, state: FSMContext):
     try:
         async with state.proxy() as data:
-            send_emile.main(f"Группа --> {data['group_id']}")
             data['number_of_posts'] = message.text
 
             if data['number_of_posts'] == "По 100 постам":
@@ -129,22 +139,21 @@ async def result(message: types.Message, state: FSMContext):
                 await message.reply(f"Ищу по {data['number_of_posts']} постам в группе: "
                                     f"{data['group_id']}")
                 await bot.send_message(message.chat.id, "Примерное время ожидания 3 минуты!")
+                logging.info(f"Группа --> {data['group_id']} по количеству постов --> {data['number_of_posts']}")
                 group_check(data['group_id'], 100)
-                active_users_file_100 = open(f"{data['group_id']}.html", 'rb')
-                await bot.send_document(message.chat.id, active_users_file_100)
-                active_users_file_100.close()
-                os.remove(f"{data['group_id']}.html")
+
+                await send_doc(file_name=data['group_id'], chat_id=message.chat.id)
+
 
             elif data['number_of_posts'] == "По 500 постам":
                 data['number_of_posts'] = 500
                 await message.reply(f"Ищу по {data['number_of_posts']} постам в группе: "
                                     f"{data['group_id']}")
                 await bot.send_message(message.chat.id, "Примерное время ожидания 6 минут!")
+                logging.info(f"Группа --> {data['group_id']} по количеству постов --> {data['number_of_posts']}")
                 group_check(data['group_id'], 500)
-                active_users_file_500 = open(f"{data['group_id']}.html", 'rb')
-                await bot.send_document(message.chat.id, active_users_file_500)
-                active_users_file_500.close()
-                os.remove(f"{data['group_id']}.html")
+
+                await send_doc(file_name=data['group_id'], chat_id=message.chat.id)
 
             elif data['number_of_posts'] == "Вся группа":
                 data['number_of_posts'] = 0
@@ -154,26 +163,29 @@ async def result(message: types.Message, state: FSMContext):
                                                                 "Если есть возможность напиши отпиши по времени "
                                                                 "сюда: ", md.bold('@avix1n')),
                                        parse_mode=ParseMode.MARKDOWN)
+                logging.info(f"Группа --> {data['group_id']} по всем постам.")
                 group_check(data['group_id'], 0)
-                active_users_file_all_group = open(f"{data['group_id']}.html", 'rb')
-                await bot.send_document(message.chat.id, active_users_file_all_group)
-                active_users_file_all_group.close()
-                os.remove(f"{data['group_id']}.html")
 
+                await send_doc(file_name=data['group_id'], chat_id=message.chat.id)
+
+        await state.finish()
         await bot.send_message(message.chat.id, "Для продолжения ты знаешь что делать.",
                                reply_markup=markups.profileKeyboard)
-        await state.finish()
     except Exception as err:
         await state.finish()
         await bot.send_message(message.chat.id, "Что-то пошло не так, проверь правильность ввода данных!",
                                reply_markup=markups.profileKeyboard)
+        logging.error(f'{err}')
         send_emile.main(f'Ошибка в "result"\n{err}')
 
 
 if __name__ == "__main__":
     try:
-        executor.start_polling(dp, skip_updates=True)
+        print("Бот запущен!")
+        logging.info(f'Bot - запущен!')
+        executor.start_polling(dp, skip_updates=False)
     except Exception as err:
         print(err)
+        logging.error(f'{err}')
         send_emile.main('Ошибка в {{{{executor.start_polling}}}}')
         executor.start_polling(dp, skip_updates=True)
